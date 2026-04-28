@@ -1,15 +1,18 @@
 const axios = require("axios");
 const { logger } = require("../middleware/logger");
+const { withRetry } = require("./retry");
 
 const ORDER_SERVICE_URL = process.env.ORDER_SERVICE_URL || "http://localhost:3003";
 const NOTIFICATION_SERVICE_URL = process.env.NOTIFICATION_SERVICE_URL || "http://localhost:3006";
 
 const post = async (baseUrl, path, body, correlationId) => {
   try {
-    const res = await axios.post(`${baseUrl}${path}`, body, {
-      headers: { "X-Correlation-Id": correlationId },
-      timeout: 5000,
-    });
+    const res = await withRetry(() =>
+      axios.post(`${baseUrl}${path}`, body, {
+        headers: { "X-Correlation-Id": correlationId },
+        timeout: 5000,
+      })
+    );
     return res.data;
   } catch (err) {
     logger.warn("downstream_call_failed", {
@@ -24,10 +27,12 @@ const post = async (baseUrl, path, body, correlationId) => {
 
 const patch = async (baseUrl, path, body, correlationId) => {
   try {
-    const res = await axios.patch(`${baseUrl}${path}`, body, {
-      headers: { "X-Correlation-Id": correlationId },
-      timeout: 5000,
-    });
+    const res = await withRetry(() =>
+      axios.patch(`${baseUrl}${path}`, body, {
+        headers: { "X-Correlation-Id": correlationId },
+        timeout: 5000,
+      })
+    );
     return res.data;
   } catch (err) {
     logger.warn("downstream_call_failed", {

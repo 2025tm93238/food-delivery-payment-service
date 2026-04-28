@@ -3,6 +3,7 @@ const Payment = require("../models/Payment");
 const IdempotencyKey = require("../models/IdempotencyKey");
 const { errors } = require("../utils/errors");
 const httpClient = require("../utils/httpClient");
+const { paymentsFailedTotal } = require("../middleware/metrics");
 
 const getNextPaymentId = async () => {
   const row = await Payment.findOne({ order: [["payment_id", "DESC"]] });
@@ -18,7 +19,11 @@ const makeReference = () => {
   return `PAY${ts}-${rand}`;
 };
 
-const charge = async ({ order_id, amount, method }, idempotencyKey, correlationId) => {
+const charge = async (
+  { order_id, amount, method, simulate_failure },
+  idempotencyKey,
+  correlationId
+) => {
   const existingKey = await IdempotencyKey.findOne({ where: { key: idempotencyKey } });
   if (existingKey) {
     const payment = await Payment.findOne({ where: { order_id: existingKey.order_id } });
@@ -30,7 +35,14 @@ const charge = async ({ order_id, amount, method }, idempotencyKey, correlationI
     throw errors.conflict("PAYMENT_ALREADY_EXISTS", `Payment for order ${order_id} already succeeded`);
   }
 
-  const status = method === "COD" ? "PENDING" : "SUCCESS";
+  let status;
+  if (simulate_failure) status = "FAILED";
+  else if (method === "COD") status = "PENDING";
+  else status = "SUCCESS";
+
+  if (status === "FAILED") {
+    paymentsFailedTotal.inc({ method, reason: "simulated" });
+  }
   const payment_id = existingPayment?.payment_id ?? (await getNextPaymentId());
   const payload = {
     payment_id,

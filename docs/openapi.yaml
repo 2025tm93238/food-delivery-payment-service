@@ -1,0 +1,188 @@
+openapi: 3.0.3
+
+info:
+  title: Payment Service API
+  version: "1.0.0"
+  description: |
+    Charges and refunds. The `POST /v1/payments/charge` endpoint is idempotent
+    via the `Idempotency-Key` header.
+
+servers:
+  - url: http://localhost:3004
+    description: Local (direct)
+  - url: http://localhost:3000
+    description: Local (via API Gateway)
+
+tags:
+  - name: Health
+  - name: Payments
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      responses:
+        "200": { description: Service is up }
+
+  /v1/payments/charge:
+    post:
+      tags: [Payments]
+      summary: Charge for an order (idempotent)
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string }
+          description: Same key within TTL returns the cached response instead of re-charging
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChargeRequest" }
+      responses:
+        "201":
+          description: Charged
+          content: { application/json: { schema: { $ref: "#/components/schemas/PaymentEnvelope" } } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/payments/{id}/refund:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer }
+    post:
+      tags: [Payments]
+      summary: Refund a payment
+      responses:
+        "200":
+          description: Refunded
+          content: { application/json: { schema: { $ref: "#/components/schemas/PaymentEnvelope" } } }
+        "400": { $ref: "#/components/responses/ValidationError" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/payments:
+    get:
+      tags: [Payments]
+      summary: List payments
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - in: query
+          name: order_id
+          schema: { type: integer }
+        - in: query
+          name: status
+          schema: { type: string, enum: [SUCCESS, FAILED, REFUNDED] }
+        - in: query
+          name: method
+          schema: { type: string, enum: [CARD, UPI, COD, WALLET] }
+      responses:
+        "200":
+          description: Paginated list
+          content: { application/json: { schema: { $ref: "#/components/schemas/PaymentList" } } }
+
+  /v1/payments/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [Payments]
+      summary: Get payment by ID
+      responses:
+        "200":
+          description: OK
+          content: { application/json: { schema: { $ref: "#/components/schemas/PaymentEnvelope" } } }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /v1/payments/by-order/{orderId}:
+    parameters:
+      - in: path
+        name: orderId
+        required: true
+        schema: { type: integer }
+    get:
+      tags: [Payments]
+      summary: Get payment(s) for a given order
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Payment" }
+
+components:
+  parameters:
+    Page:
+      in: query
+      name: page
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      in: query
+      name: limit
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+
+  schemas:
+    ChargeRequest:
+      type: object
+      required: [order_id, amount, method]
+      properties:
+        order_id: { type: integer, example: 1 }
+        amount: { type: number, minimum: 0.01, example: 660.00 }
+        method: { type: string, enum: [CARD, UPI, COD, WALLET], example: UPI }
+
+    Payment:
+      type: object
+      properties:
+        payment_id: { type: integer }
+        order_id: { type: integer }
+        amount: { type: number }
+        method: { type: string, enum: [CARD, UPI, COD, WALLET] }
+        status: { type: string, enum: [SUCCESS, FAILED, REFUNDED] }
+        idempotency_key: { type: string }
+        created_at: { type: string, format: date-time }
+
+    PaymentEnvelope:
+      type: object
+      properties:
+        data: { $ref: "#/components/schemas/Payment" }
+
+    PaymentList:
+      type: object
+      properties:
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/Payment" }
+        page: { type: integer }
+        limit: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+
+    Error:
+      type: object
+      required: [code, message, correlationId]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        correlationId: { type: string, format: uuid }
+
+  responses:
+    ValidationError:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
